@@ -1,8 +1,17 @@
 # =============================================================================
 # Indian Railways: Predict Train Delay
-# FILE 02  --  PART 2: DATA PREPROCESSING + EDA   (Eisha)
+# PART 2  --  DATA PREPROCESSING + EXPLORATORY DATA ANALYSIS (EDA)
 #
-# Input : cleaned_data.rds   (made by 01_understanding_cleaning.R)
+# This file ONLY does preprocessing + EDA. It builds on Member 1's output
+# (data understanding + cleaning), which is created by train_delay_pipeline.R:
+#   X       = cleaned training features
+#   X_test  = cleaned test features
+#   y       = target (1 = train arrived more than 15 minutes late)
+#
+# HOW TO RUN
+#   1. source("train_delay_pipeline.R")     # Member 1 -> creates X, X_test, y
+#   2. source("02_preprocessing_eda.R")     # this file
+#
 # Output: plots/ folder with EDA charts, preprocessed_data.rds
 # =============================================================================
 
@@ -15,41 +24,46 @@ library(corrplot)
 set.seed(42)
 dir.create("plots", showWarnings = FALSE)
 
-# ---- CONFIG (already filled for this dataset) -------------------------------
-TRAIN_PATH  <- "ir_train.csv"
-TEST_PATH   <- "ir_test.csv"
-DICT_PATH   <- "ir_data_dictionary.csv"
-SAMPLE_SUB  <- "ir_sample_submission.csv"
+# ---- CONFIG -----------------------------------------------------------------
+ID_COL         <- "journey_id"      # only used to keep test ids for the submission
+HIGH_CARD_COLS <- c("train_number") # looks like a number but is really a label
+DROP_COLS      <- c("zone")         # duplicate of zone_abbr
+SAMPLE_N       <- 200000            # rows used here (NULL = all 1.5 million)
 
-TARGET      <- "is_delayed"                  # 1 = arrived > 15 min late
-ID_COL      <- "journey_id"
-DATE_COLS   <- c("departure_date")
-# Columns that only exist AFTER the journey (data leakage) -> must be removed
-LEAKY_COLS  <- c("delay_minutes", "primary_delay_cause")
-# Columns that look like numbers but are really labels (many categories)
-HIGH_CARD_COLS <- c("train_number")
-# Redundant columns (zone is the long name of zone_abbr)
-DROP_COLS   <- c("zone")
+# =============================================================================
+# INPUT: Member 1's output
+# =============================================================================
+if (!all(sapply(c("X", "X_test", "y"), exists, envir = globalenv())))
+  stop("Member 1's output (X, X_test, y) was not found. ",
+       "Run source(\"train_delay_pipeline.R\") first, then run this file.")
 
-# SAMPLE_N: the train file has 1.5 million rows. Start with 200,000 so that
-# everything runs in minutes. Set to NULL later to use ALL rows.
-SAMPLE_N    <- 200000
+test_ids <- NULL
+if (exists("test", envir = globalenv()) && ID_COL %in% names(get("test", envir = globalenv())))
+  test_ids <- get("test", envir = globalenv())[[ID_COL]]       # keep ids for the submission
 
-RUN_PCA          <- TRUE      # run section 5B
-USE_PCA_FEATURES <- TRUE      # add PC scores as model features
-PCA_VARIANCE     <- 0.95      # keep PCs that explain 95% of variance
+train <- as_tibble(X)
+train$is_late <- as.integer(y)                                  # 1 = late > 15 min
+test  <- as_tibble(X_test)
+if (!is.null(test_ids)) test[[ID_COL]] <- test_ids
 
-# helper: make column names lowercase_with_underscores
-clean_nm <- function(x) tolower(gsub("^_|_$", "", gsub("[^A-Za-z0-9]+", "_", x)))
+# free memory (Member 1's script leaves several big copies of the data)
+rm(list = intersect(c("train_model", "test_model", "X_train", "X_valid",
+                      "X_train_sample", "y_train", "y_valid"), ls(globalenv())),
+   envir = globalenv())
+invisible(gc())
 
-# ---- Load the cleaned data produced by Part 1 -------------------------------
-if (!file.exists("cleaned_data.rds"))
-  stop("cleaned_data.rds not found. Run 01_understanding_cleaning.R first ",
-       "(or get cleaned_data.rds from the teammate who did Part 1).")
-cleaned <- readRDS("cleaned_data.rds")
-train <- cleaned$train
-test  <- cleaned$test
-cat("Loaded cleaned data:", nrow(train), "rows x", ncol(train), "columns\n")
+# train_number is a label (train id), not a number
+for (col in intersect(HIGH_CARD_COLS, names(train))) train[[col]] <- as.character(train[[col]])
+for (col in intersect(HIGH_CARD_COLS, names(test)))  test[[col]]  <- as.character(test[[col]])
+train <- train %>% select(-any_of(DROP_COLS))
+test  <- test  %>% select(-any_of(DROP_COLS))
+
+cat("Train:", nrow(train), "rows x", ncol(train), "columns\n")
+if (!is.null(SAMPLE_N) && nrow(train) > SAMPLE_N) {
+  train <- slice_sample(train, n = SAMPLE_N)
+  cat("Using a random sample of", SAMPLE_N, "rows (set SAMPLE_N <- NULL for all rows)\n")
+}
+cat("Late rate:", round(mean(train$is_late), 4), "\n\n")
 
 # =============================================================================
 # 3. DATA PREPROCESSING
