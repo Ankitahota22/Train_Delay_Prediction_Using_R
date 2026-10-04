@@ -99,6 +99,54 @@ X <- train_model %>%
 
 X_test <- test_model
 
+# ============================================
+# FEATURE ENGINEERING
+# ============================================
+
+engineer_features <- function(df) {
+  df %>%
+    mutate(
+      source_station_rank = case_when(
+        source_station_category == "A1" ~ 6,
+        source_station_category == "A" ~ 5,
+        source_station_category == "B" ~ 4,
+        source_station_category == "C" ~ 3,
+        source_station_category == "D" ~ 2,
+        source_station_category == "E" ~ 1,
+        TRUE ~ 0
+      ),
+      destination_station_rank = case_when(
+        destination_station_category == "A1" ~ 6,
+        destination_station_category == "A" ~ 5,
+        destination_station_category == "B" ~ 4,
+        destination_station_category == "C" ~ 3,
+        destination_station_category == "D" ~ 2,
+        destination_station_category == "E" ~ 1,
+        TRUE ~ 0
+      ),
+      station_category_gap = abs(source_station_rank - destination_station_rank),
+      distance_per_hour = distance_km / pmax(scheduled_travel_hours, 1),
+      distance_per_stop = distance_km / pmax(num_scheduled_stops, 1),
+      crowding_pressure = seat_utilisation_pct * as.numeric(is_overloaded),
+      maintenance_risk = maintenance_score * (1 + as.numeric(is_rake_shared)),
+      route_risk = route_historical_ontime_pct * (1 + zone_congestion_index),
+      total_weather_risk = fog_risk_score + zone_fog_index + season_severity_score,
+      departure_hour_sin = sin(2 * pi * departure_hour / 24),
+      departure_hour_cos = cos(2 * pi * departure_hour / 24),
+      month_sin = sin(2 * pi * month / 12),
+      month_cos = cos(2 * pi * month / 12),
+      weekend_peak = as.integer(is_weekend == 1 & is_peak_hour == 1),
+      night_peak = as.integer(is_night_departure == 1 & is_peak_hour == 1),
+      train_age = pmax(loco_age_years, coach_age_years)
+    )
+}
+
+X <- engineer_features(X)
+X_test <- engineer_features(X_test)
+
+cat("\nEngineered features added to training and test sets.\n")
+print(names(X)[(length(names(X)) - 15):length(names(X))])
+
 cat("\nNumber of training features:", ncol(X), "\n")
 cat("Number of test features:", ncol(X_test), "\n")
 # ============================================
@@ -150,6 +198,38 @@ print(missing_in_test)
 
 cat("\nExtra columns in test:\n")
 print(extra_in_test)
+# ============================================
+# FEATURE EXTRACTION: PCA
+# ============================================
+# PCA is applied only to continuous numeric variables to reduce multicollinearity
+# and capture dominant variation patterns before modeling.
+
+numeric_cols <- names(X)[sapply(X, is.numeric)]
+keep_numeric <- sapply(X[numeric_cols], function(x) length(unique(stats::na.omit(x))) > 1)
+numeric_cols <- numeric_cols[keep_numeric]
+cat_cols <- setdiff(names(X), numeric_cols)
+
+if (length(numeric_cols) > 1) {
+  pca_fit <- prcomp(X[numeric_cols], center = TRUE, scale. = TRUE)
+  pca_summary <- summary(pca_fit)$importance
+  variance_cutoff <- 0.95
+  n_pca <- which(pca_summary[3, ] >= variance_cutoff)[1]
+  if (is.na(n_pca)) n_pca <- ncol(pca_fit$x)
+
+  pca_train <- as.data.frame(pca_fit$x[, 1:n_pca, drop = FALSE])
+  names(pca_train) <- paste0("PC", seq_len(ncol(pca_train)))
+
+  pca_test <- as.data.frame(predict(pca_fit, newdata = X_test[numeric_cols]))[, 1:n_pca, drop = FALSE]
+  names(pca_test) <- paste0("PC", seq_len(ncol(pca_test)))
+
+  X <- cbind(pca_train, X[cat_cols])
+  X_test <- cbind(pca_test, X_test[cat_cols])
+
+  cat("\nPCA reduced numeric features from", length(numeric_cols), "to", n_pca, "components.\n")
+  cat("Cumulative variance explained:", round(pca_summary[3, n_pca], 4), "\n")
+} else {
+  cat("\nPCA skipped: no valid numeric features with variance were found.\n")
+}
 # ============================================
 # CREATE TRAIN / VALIDATION SPLIT
 # ============================================
