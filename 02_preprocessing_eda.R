@@ -219,3 +219,4 @@ saveRDS(list(train = train, test = test, num_cols = num_cols, cat_cols = cat_col
              na_cols = na_cols, station_rank = station_rank),
         "preprocessed_data.rds")
 cat("\nSaved preprocessed_data.rds. PREPROCESSING + EDA DONE.\n")
+# (Preprocessing + EDA) completed
