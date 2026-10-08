@@ -185,66 +185,244 @@ cat("Final modelling features:", ncol(X_train), "\n")
 # MODEL 1 - LOGISTIC REGRESSION
 # =============================================================================
 
+# =============================================================================
+# MODEL 1 - LOGISTIC REGRESSION
+# =============================================================================
+
 cat("\n============================================================\n")
 cat("MODEL 1: LOGISTIC REGRESSION\n")
 cat("============================================================\n")
 
-# Logistic regression needs numeric predictors.
-# Convert categorical variables using dummy variables.
+
+# -------------------------------------------------------------------------
+# 1. Create a small balanced training sample
+# -------------------------------------------------------------------------
+
+set.seed(123)
+
+# Check target classes
+cat("\nTarget classes in y_train:\n")
+print(table(y_train))
+
+
+# Find the two actual classes
+class_names <- levels(factor(y_train))
+
+cat("\nClass names:\n")
+print(class_names)
+
+
+# Separate the two classes using their actual names
+class_0 <- X_train[
+  y_train == class_names[1],
+  ,
+  drop = FALSE
+]
+
+class_1 <- X_train[
+  y_train == class_names[2],
+  ,
+  drop = FALSE
+]
+
+
+# Take at most 20,000 from each class
+n_each <- min(
+  20000,
+  nrow(class_0),
+  nrow(class_1)
+)
+
+
+cat(
+  "\nRows sampled from each class:",
+  n_each,
+  "\n"
+)
+
+
+# Random samples
+idx_0 <- sample(
+  seq_len(nrow(class_0)),
+  n_each
+)
+
+idx_1 <- sample(
+  seq_len(nrow(class_1)),
+  n_each
+)
+
+
+# Combine
+X_log <- rbind(
+  class_0[idx_0, , drop = FALSE],
+  class_1[idx_1, , drop = FALSE]
+)
+
+
+# Target for logistic regression
+y_log <- factor(
+  c(
+    rep(class_names[1], n_each),
+    rep(class_names[2], n_each)
+  ),
+  levels = class_names
+)
+
+
+# Clean temporary objects
+rm(
+  class_0,
+  class_1,
+  idx_0,
+  idx_1
+)
+
+gc()
+
+
+cat(
+  "Logistic regression training rows:",
+  nrow(X_log),
+  "\n"
+)
+
+# -------------------------------------------------------------------------
+# 2. Create dummy variables USING ONLY PREDICTORS
+# -------------------------------------------------------------------------
 
 dummy_model <- dummyVars(
   ~ .,
-  data = X_train,
+  data = X_log,
   fullRank = TRUE
 )
 
-X_train_dummy <- predict(
-  dummy_model,
-  newdata = X_train
+
+X_log_dummy <- as.data.frame(
+  predict(
+    dummy_model,
+    newdata = X_log
+  )
 )
 
-X_valid_dummy <- predict(
-  dummy_model,
-  newdata = X_valid
+
+# Create validation dummy variables
+X_valid_dummy <- as.data.frame(
+  predict(
+    dummy_model,
+    newdata = X_valid
+  )
 )
 
-X_test_dummy <- predict(
-  dummy_model,
-  newdata = X_test
+
+# -------------------------------------------------------------------------
+# 3. Make validation columns exactly match training columns
+# -------------------------------------------------------------------------
+
+train_cols <- colnames(X_log_dummy)
+
+missing_cols <- setdiff(
+  train_cols,
+  colnames(X_valid_dummy)
 )
 
-X_train_dummy <- as.data.frame(X_train_dummy)
-X_valid_dummy <- as.data.frame(X_valid_dummy)
-X_test_dummy <- as.data.frame(X_test_dummy)
+if (length(missing_cols) > 0) {
 
-# Remove problematic columns with zero variance
-dummy_nzv <- nearZeroVar(X_train_dummy)
+  for (col in missing_cols) {
+    X_valid_dummy[[col]] <- 0
+  }
+
+}
+
+
+# Remove any extra columns
+extra_cols <- setdiff(
+  colnames(X_valid_dummy),
+  train_cols
+)
+
+if (length(extra_cols) > 0) {
+
+  X_valid_dummy <- X_valid_dummy[
+    ,
+    !(colnames(X_valid_dummy) %in% extra_cols),
+    drop = FALSE
+  ]
+
+}
+
+
+# Put columns in exactly the same order
+X_valid_dummy <- X_valid_dummy[
+  ,
+  train_cols,
+  drop = FALSE
+]
+
+
+# -------------------------------------------------------------------------
+# 4. Remove near-zero variance features
+# -------------------------------------------------------------------------
+
+dummy_nzv <- nearZeroVar(
+  X_log_dummy
+)
 
 if (length(dummy_nzv) > 0) {
 
-  X_train_dummy <- X_train_dummy[, -dummy_nzv, drop = FALSE]
-  X_valid_dummy <- X_valid_dummy[, -dummy_nzv, drop = FALSE]
-  X_test_dummy  <- X_test_dummy[, -dummy_nzv, drop = FALSE]
+  X_log_dummy <- X_log_dummy[
+    ,
+    -dummy_nzv,
+    drop = FALSE
+  ]
+
+  X_valid_dummy <- X_valid_dummy[
+    ,
+    -dummy_nzv,
+    drop = FALSE
+  ]
+
 }
 
-cat("Dummy-variable features:", ncol(X_train_dummy), "\n")
+
+cat(
+  "Dummy-variable features:",
+  ncol(X_log_dummy),
+  "\n"
+)
 
 
-# Fit logistic regression
+# -------------------------------------------------------------------------
+# 5. Train Logistic Regression
+# -------------------------------------------------------------------------
+
+cat(
+  "\nTraining Logistic Regression...\n"
+)
+
+
+logistic_train <- data.frame(
+  y_log = y_log,
+  X_log_dummy,
+  check.names = FALSE
+)
+
 
 logistic_model <- glm(
-  y_train ~ .,
-  data = data.frame(
-    y_train = y_train,
-    X_train_dummy
-  ),
+  y_log ~ .,
+  data = logistic_train,
   family = binomial()
 )
 
-cat("\nLogistic regression trained successfully.\n")
+
+cat(
+  "\nLogistic regression trained successfully.\n"
+)
 
 
-# Predict probabilities
+# -------------------------------------------------------------------------
+# 6. Predict validation data
+# -------------------------------------------------------------------------
 
 logistic_prob <- predict(
   logistic_model,
@@ -252,21 +430,27 @@ logistic_prob <- predict(
   type = "response"
 )
 
+
+# -------------------------------------------------------------------------
+# 7. Convert probabilities to classes
+# -------------------------------------------------------------------------
+
 logistic_pred <- ifelse(
   logistic_prob >= 0.50,
   "Delayed",
   "Not_Delayed"
 )
 
+
 logistic_pred <- factor(
   logistic_pred,
-  levels = levels(y_factor)
+  levels = c("Not_Delayed", "Delayed")
 )
 
 
-# -----------------------------------------------------------------------------
-# LOGISTIC REGRESSION VERIFICATION
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------
+# 8. Confusion Matrix
+# -------------------------------------------------------------------------
 
 logistic_cm <- confusionMatrix(
   logistic_pred,
@@ -274,11 +458,28 @@ logistic_cm <- confusionMatrix(
   positive = "Delayed"
 )
 
-cat("\nLOGISTIC REGRESSION CONFUSION MATRIX:\n")
+
+cat(
+  "\nLOGISTIC REGRESSION CONFUSION MATRIX:\n"
+)
+
 print(logistic_cm$table)
 
-cat("\nLOGISTIC REGRESSION METRICS:\n")
+
+# -------------------------------------------------------------------------
+# 9. Metrics
+# -------------------------------------------------------------------------
+
+cat(
+  "\nLOGISTIC REGRESSION METRICS:\n"
+)
+
 print(logistic_cm$byClass)
+
+
+# -------------------------------------------------------------------------
+# 10. ROC-AUC
+# -------------------------------------------------------------------------
 
 logistic_roc <- roc(
   response = y_valid,
@@ -287,12 +488,30 @@ logistic_roc <- roc(
   direction = "<"
 )
 
-logistic_auc <- as.numeric(auc(logistic_roc))
 
-cat("\nLogistic Regression ROC-AUC:",
-    round(logistic_auc, 4), "\n")
+logistic_auc <- as.numeric(
+  auc(logistic_roc)
+)
 
 
+cat(
+  "\nLogistic Regression ROC-AUC:",
+  round(logistic_auc, 4),
+  "\n"
+)
+
+
+# -------------------------------------------------------------------------
+# 11. Clean temporary objects
+# -------------------------------------------------------------------------
+
+rm(
+  X_log_dummy,
+  X_valid_dummy,
+  logistic_train
+)
+
+gc()
 # =============================================================================
 # MODEL 2 - RANDOM FOREST
 # =============================================================================
