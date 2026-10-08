@@ -1,7 +1,7 @@
 ir_train.csv
 ir_test.csv
 ir_sample_submission.csv
-plots/
+
 *.rds.RDataTmp
 Project.RData
 Rplot.png
