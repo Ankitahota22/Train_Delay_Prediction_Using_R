@@ -2,9 +2,9 @@
 
 Predicting whether an Indian Railways journey will be delayed, using an end-to-end R workflow: data understanding, cleaning, preprocessing, EDA, feature engineering, PCA and classification models.
 
-> **Course:** Data Science & Analytics (DSA), Assignment 1
+> **Course:** Data Science & Analytics (DSA)
 > **Institute:** Government College of Engineering Kalahandi, Dept. of Computer Science & Engineering
-> **Guided by:** Prof. Sunanda Jena
+
 
 ---
 
